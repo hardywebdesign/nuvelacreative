@@ -5,17 +5,18 @@ import { STUDIO_NAME } from "@/lib/site";
 export const runtime = "nodejs";
 
 // Resend webhook for the "email.received" event: when someone emails hello@nuvelacreative.com,
-// send a short text alert through the phone carrier's email-to-text address.
+// send a short alert email (to Gmail, so the phone shows a notification).
 //
 // Vercel environment variables:
 //   RESEND_WEBHOOK_SECRET  the webhook's signing secret from Resend (starts with "whsec_")
-//   NOTIFY_SMS_EMAIL       the carrier's email-to-text address, e.g. 6165551234@vtext.com
+//   ALERT_EMAIL            where alerts go; falls back to NOTIFY_EMAIL. A carrier email-to-text
+//                          address (e.g. 6165551234@vtext.com) also works if the carrier still offers one.
 export async function POST(req: Request) {
   const apiKey = process.env.RESEND_API_KEY;
   const secret = process.env.RESEND_WEBHOOK_SECRET;
-  const smsTo = process.env.NOTIFY_SMS_EMAIL;
-  if (!apiKey || !secret || !smsTo) {
-    console.error("Missing RESEND_API_KEY, RESEND_WEBHOOK_SECRET or NOTIFY_SMS_EMAIL environment variable.");
+  const alertTo = process.env.ALERT_EMAIL || process.env.NOTIFY_EMAIL;
+  if (!apiKey || !secret || !alertTo) {
+    console.error("Missing RESEND_API_KEY, RESEND_WEBHOOK_SECRET or ALERT_EMAIL environment variable.");
     return NextResponse.json({ error: "Not configured" }, { status: 503 });
   }
 
@@ -42,18 +43,17 @@ export async function POST(req: Request) {
 
   const sender = senderName(event.data.from);
   const subject = event.data.subject?.trim() || "(no subject)";
-  // Keep it short: texts over 160 characters can get split or cut off.
+  // Short enough to read in a phone notification (or a text, if ALERT_EMAIL is a carrier address).
   const text = clip(`New email from ${sender}: ${subject}`, 140);
 
   const { error } = await resend.emails.send({
     from: process.env.FROM_EMAIL || `${STUDIO_NAME} <onboarding@resend.dev>`,
-    to: [smsTo],
-    // Many carriers show the subject in front of the text, so keep it to one word.
-    subject: "Nuvela",
-    text,
+    to: [alertTo],
+    subject: clip(`📩 hello@ inbox: ${sender}: ${subject}`, 120),
+    text: `${text}\n\nRead it in your Resend inbox.`,
   });
   if (error) {
-    console.error("Text alert failed:", error);
+    console.error("New-email alert failed:", error);
     // A 500 makes Resend retry the webhook later.
     return NextResponse.json({ error: "Alert failed" }, { status: 500 });
   }
